@@ -1,0 +1,15 @@
+[
+  {
+    "id": "demo-user",
+    "age": 30,
+    "weight": 70.0,
+    "gender": "female",
+    "activity_level": "moderate",
+    "goal": "weight_loss",
+    "preferred_cuisines": ["Mediterranean"],
+    "allergies": ["peanuts"],
+    "dietary_restrictions": ["vegetarian"],
+    "health_conditions": ["hypertension"],
+    "region": "Southern Europe"
+  }
+]
