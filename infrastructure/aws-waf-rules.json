@@ -1,0 +1,298 @@
+{
+  "Name": "SnackTrack-WAF-RuleGroup",
+  "Description": "WAF rules for SnackTrack API rate limiting and protection",
+  "Scope": "REGIONAL",
+  "Capacity": 500,
+  "Rules": [
+    {
+      "Name": "RateLimit-Unauth-Global",
+      "Priority": 1,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 250,
+          "EvaluationWindowSec": 300,
+          "AggregateKeyType": "IP",
+          "ScopeDownStatement": {
+            "NotStatement": {
+              "Statement": {
+                "ByteMatchStatement": {
+                  "FieldToMatch": {
+                    "SingleHeader": {
+                      "Name": "authorization"
+                    }
+                  },
+                  "PositionalConstraint": "STARTS_WITH",
+                  "SearchString": "Bearer ",
+                  "TextTransformations": [
+                    {
+                      "Priority": 0,
+                      "Type": "NONE"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 429,
+            "CustomResponseBodyKey": "RateLimitExceeded"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "SnackTrack-RateLimit-Unauth"
+      }
+    },
+    {
+      "Name": "RateLimit-Auth-Backstop",
+      "Priority": 2,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 2000,
+          "EvaluationWindowSec": 300,
+          "AggregateKeyType": "IP",
+          "ScopeDownStatement": {
+            "ByteMatchStatement": {
+              "FieldToMatch": {
+                "SingleHeader": {
+                  "Name": "authorization"
+                }
+              },
+              "PositionalConstraint": "STARTS_WITH",
+              "SearchString": "Bearer ",
+              "TextTransformations": [
+                {
+                  "Priority": 0,
+                  "Type": "NONE"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 429,
+            "CustomResponseBodyKey": "RateLimitExceeded"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "SnackTrack-RateLimit-Auth-Backstop"
+      }
+    },
+    {
+      "Name": "RateLimit-Sensitive-Endpoints",
+      "Priority": 3,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 25,
+          "EvaluationWindowSec": 300,
+          "AggregateKeyType": "IP",
+          "ScopeDownStatement": {
+            "OrStatement": {
+              "Statements": [
+                {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {}
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/api/v1/auth/login",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {}
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/api/v1/auth/register",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {}
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/api/v1/auth/forgot-password",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {}
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/api/v1/auth/reset-password",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 429,
+            "CustomResponseBodyKey": "RateLimitExceeded"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "SnackTrack-RateLimit-Sensitive"
+      }
+    },
+    {
+      "Name": "RateLimit-ThirdParty-Unauth",
+      "Priority": 4,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 75,
+          "EvaluationWindowSec": 300,
+          "AggregateKeyType": "IP",
+          "ScopeDownStatement": {
+            "AndStatement": {
+              "Statements": [
+                {
+                  "NotStatement": {
+                    "Statement": {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "SingleHeader": {
+                            "Name": "authorization"
+                          }
+                        },
+                        "PositionalConstraint": "STARTS_WITH",
+                        "SearchString": "Bearer ",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "NONE"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "OrStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {}
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/api/v1/recipes/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {}
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/api/v1/geocode",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {}
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/api/v1/nutrition",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 429,
+            "CustomResponseBodyKey": "RateLimitExceeded"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "SnackTrack-RateLimit-ThirdParty-Unauth"
+      }
+    }
+  ],
+  "CustomResponseBodies": {
+    "RateLimitExceeded": {
+      "ContentType": "APPLICATION_JSON",
+      "Content": "{\"error\": \"Too Many Requests\", \"message\": \"Rate limit exceeded. Please slow down and try again.\", \"retry_after\": 60}"
+    }
+  },
+  "VisibilityConfig": {
+    "SampledRequestsEnabled": true,
+    "CloudWatchMetricsEnabled": true,
+    "MetricName": "SnackTrack-WAF-RuleGroup"
+  }
+}
+

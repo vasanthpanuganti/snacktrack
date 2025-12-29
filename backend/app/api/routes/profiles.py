@@ -217,7 +217,8 @@ async def update_profile(user_id: str, updates: ProfileUpdate) -> ProfileRespons
             updated_data[field] = value
     
     # Recalculate if relevant fields changed
-    if any(updates.model_dump(exclude_unset=True).get(f) for f in ["weight", "height", "age", "activity_level", "goal"]):
+    update_dict = updates.model_dump(exclude_unset=True)
+    if any(f in update_dict for f in ["weight", "height", "age", "activity_level", "goal"]):
         bmr = calculate_bmr(updated_data["weight"], updated_data["height"], updated_data["age"], updated_data["gender"])
         tdee = calculate_tdee(bmr, updated_data["activity_level"])
         calorie_target = calculate_calorie_target(tdee, updated_data["goal"])

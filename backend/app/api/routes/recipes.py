@@ -332,6 +332,27 @@ async def get_recipes_for_health_condition(
     return results[:limit]
 
 
+# NOTE: This route must come BEFORE /{recipe_id} to avoid being shadowed
+@router.get("/{recipe_id}/alternatives", response_model=List[RecipeResponse], summary="Get recipe alternatives")
+async def get_recipe_alternatives(
+    recipe_id: str,
+    limit: int = Query(default=3, ge=1, le=10),
+) -> List[RecipeResponse]:
+    """Get alternative recipes with similar nutrition profile"""
+    recipe = next((r for r in SAMPLE_RECIPES if r.id == recipe_id), None)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    # Find recipes with similar calories (within 100 kcal)
+    alternatives = [
+        r for r in SAMPLE_RECIPES 
+        if r.id != recipe_id and 
+        abs(r.nutrition.calories - recipe.nutrition.calories) <= 100
+    ]
+    
+    return alternatives[:limit]
+
+
 @router.get("/{recipe_id}", response_model=RecipeResponse, summary="Get recipe by ID")
 async def get_recipe(recipe_id: str) -> RecipeResponse:
     """Get a specific recipe by ID"""
@@ -365,23 +386,3 @@ async def update_recipe(recipe_id: str, recipe: RecipeCreate) -> RecipeResponse:
 async def delete_recipe(recipe_id: str):
     """Delete a recipe (admin only)"""
     return {"message": f"Recipe {recipe_id} deleted successfully"}
-
-
-@router.get("/{recipe_id}/alternatives", response_model=List[RecipeResponse], summary="Get recipe alternatives")
-async def get_recipe_alternatives(
-    recipe_id: str,
-    limit: int = Query(default=3, ge=1, le=10),
-) -> List[RecipeResponse]:
-    """Get alternative recipes with similar nutrition profile"""
-    recipe = next((r for r in SAMPLE_RECIPES if r.id == recipe_id), None)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
-    
-    # Find recipes with similar calories (within 100 kcal)
-    alternatives = [
-        r for r in SAMPLE_RECIPES 
-        if r.id != recipe_id and 
-        abs(r.nutrition.calories - recipe.nutrition.calories) <= 100
-    ]
-    
-    return alternatives[:limit]
