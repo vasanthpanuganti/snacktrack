@@ -1,6 +1,11 @@
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
+import logging
+
+from app.services.spoonacular import spoonacular_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -275,6 +280,38 @@ async def list_recipes(
 ) -> List[RecipeResponse]:
     """Get all recipes with optional filtering"""
     
+    # Try to use Spoonacular API if configured
+    if spoonacular_service.api_key:
+        try:
+            results = await spoonacular_service.search_recipes(
+                query=search,
+                cuisine=cuisine,
+                diet=diet_type,
+                exclude_ingredients=exclude_allergens,
+                max_calories=max_calories,
+                max_prep_time=max_prep_time,
+                offset=offset,
+                limit=limit,
+            )
+            
+            # Filter by meal_type and tags if provided (Spoonacular doesn't support these directly)
+            if meal_type:
+                results = [r for r in results if r.meal_type.lower() == meal_type.lower()]
+            
+            if tags:
+                tag_list = [t.strip().lower() for t in tags.split(",")]
+                results = [
+                    r for r in results
+                    if any(t in [tag.lower() for tag in r.tags] for t in tag_list)
+                ]
+            
+            return results
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
+    
+    # Fallback to sample data
     results = SAMPLE_RECIPES.copy()
     
     if cuisine:
@@ -307,7 +344,21 @@ async def list_recipes(
 @router.get("/featured", response_model=List[RecipeResponse], summary="Get featured recipes")
 async def get_featured_recipes(limit: int = Query(default=6, ge=1, le=20)) -> List[RecipeResponse]:
     """Get featured/popular recipes"""
-    # Sort by rating and return top recipes
+    # Try Spoonacular API if configured
+    if spoonacular_service.api_key:
+        try:
+            # Search for popular recipes (sorted by popularity/score)
+            results = await spoonacular_service.search_recipes(
+                limit=limit,
+                offset=0,
+            )
+            # Sort by rating and return top recipes
+            sorted_results = sorted(results, key=lambda r: r.rating, reverse=True)
+            return sorted_results[:limit]
+        except Exception as e:
+            logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
+    
+    # Fallback to sample data
     sorted_recipes = sorted(SAMPLE_RECIPES, key=lambda r: r.rating, reverse=True)
     return sorted_recipes[:limit]
 
@@ -318,7 +369,29 @@ async def get_regional_recipes(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> List[RecipeResponse]:
     """Get recipes tailored to a specific region"""
-    # In a real app, this would filter by region availability
+    # Try Spoonacular API if configured
+    # Map common regions to Spoonacular cuisines
+    region_to_cuisine = {
+        "North America": "American",
+        "South America": "Latin American",
+        "Europe": "European",
+        "Asia": "Asian",
+        "Middle East": "Middle Eastern",
+        "Africa": "African",
+    }
+    cuisine = region_to_cuisine.get(region)
+    
+    if spoonacular_service.api_key and cuisine:
+        try:
+            return await spoonacular_service.search_recipes(
+                cuisine=cuisine,
+                limit=limit,
+                offset=0,
+            )
+        except Exception as e:
+            logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
+    
+    # Fallback to sample data
     return SAMPLE_RECIPES[:limit]
 
 
@@ -339,6 +412,19 @@ async def get_recipe_alternatives(
     limit: int = Query(default=3, ge=1, le=10),
 ) -> List[RecipeResponse]:
     """Get alternative recipes with similar nutrition profile"""
+    # Try Spoonacular API if configured and recipe_id is numeric
+    if spoonacular_service.api_key and recipe_id.isdigit():
+        try:
+            return await spoonacular_service.get_recipe_alternatives(
+                recipe_id=int(recipe_id),
+                limit=limit,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
+    
+    # Fallback to sample data
     recipe = next((r for r in SAMPLE_RECIPES if r.id == recipe_id), None)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
@@ -356,6 +442,16 @@ async def get_recipe_alternatives(
 @router.get("/{recipe_id}", response_model=RecipeResponse, summary="Get recipe by ID")
 async def get_recipe(recipe_id: str) -> RecipeResponse:
     """Get a specific recipe by ID"""
+    # Try Spoonacular API if configured and recipe_id is numeric
+    if spoonacular_service.api_key and recipe_id.isdigit():
+        try:
+            return await spoonacular_service.get_recipe_by_id(int(recipe_id))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
+    
+    # Fallback to sample data
     recipe = next((r for r in SAMPLE_RECIPES if r.id == recipe_id), None)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")

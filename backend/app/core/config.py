@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # Third-party APIs
     SPOONACULAR_API_KEY: Optional[str] = None
     GOOGLE_GEOCODING_API_KEY: Optional[str] = None
+    USDA_API_KEY: Optional[str] = None  # USDA FoodData Central API key
     
     # AWS (for production)
     AWS_REGION: str = "us-east-1"

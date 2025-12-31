@@ -19,6 +19,7 @@ from app.api.routes import (
     recommendations,
     recipes,
     meals,
+    foods,
     progress,
     leaderboard,
     admin,
@@ -112,6 +113,11 @@ def create_application() -> FastAPI:
         meals.router,
         prefix="/api/v1/meals",
         tags=["meals"],
+    )
+    application.include_router(
+        foods.router,
+        prefix="/api/v1/foods",
+        tags=["foods"],
     )
     application.include_router(
         progress.router,

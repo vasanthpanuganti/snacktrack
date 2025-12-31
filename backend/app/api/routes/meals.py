@@ -3,6 +3,8 @@ from datetime import date, datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.services.usda import usda_service
+
 router = APIRouter()
 
 
@@ -44,6 +46,7 @@ class MealLogCreate(BaseModel):
     fat: float
     meal_type: str
     recipe_id: Optional[str] = None
+    fdc_id: Optional[int] = None  # USDA FoodData Central ID for automatic nutrition lookup
 
 
 class WaterLogUpdate(BaseModel):
@@ -112,14 +115,35 @@ async def get_daily_log(date_str: str, user_id: str = Query(default="demo-user")
 
 @router.post("/log", response_model=MealLogEntry, summary="Log a meal")
 async def log_meal(meal: MealLogCreate, user_id: str = Query(default="demo-user")):
-    """Log a new meal for the current day"""
+    """Log a new meal for the current day. If fdc_id is provided, nutrition data will be fetched from USDA API."""
+    calories = meal.calories
+    protein = meal.protein
+    carbs = meal.carbs
+    fat = meal.fat
+    
+    # If USDA FDC ID is provided, fetch nutrition data automatically
+    if meal.fdc_id and usda_service.api_key:
+        try:
+            food_nutrition = await usda_service.get_food_by_id(meal.fdc_id)
+            # Use USDA data if available, otherwise use provided values
+            calories = int(food_nutrition.calories) if food_nutrition.calories else calories
+            protein = food_nutrition.protein if food_nutrition.protein else protein
+            carbs = food_nutrition.carbs if food_nutrition.carbs else carbs
+            fat = food_nutrition.fat if food_nutrition.fat else fat
+        except HTTPException:
+            # If USDA lookup fails, use provided values
+            pass
+        except Exception:
+            # If USDA lookup fails, use provided values
+            pass
+    
     entry = MealLogEntry(
         id=f"meal_{datetime.now().timestamp()}",
         name=meal.name,
-        calories=meal.calories,
-        protein=meal.protein,
-        carbs=meal.carbs,
-        fat=meal.fat,
+        calories=calories,
+        protein=protein,
+        carbs=carbs,
+        fat=fat,
         meal_type=meal.meal_type,
         time=datetime.now().strftime("%H:%M"),
         recipe_id=meal.recipe_id
