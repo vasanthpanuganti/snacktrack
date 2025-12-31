@@ -1,4 +1,4 @@
-# 🥗 SnackTrack
+# 🥗 snacktrack
 
 **Your Personal Diet Companion** - An intelligent, affordable, and inclusive diet planning platform that delivers personalized, health-aware meal plans and recipes.
 
