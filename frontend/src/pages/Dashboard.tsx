@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
@@ -63,14 +63,26 @@ export default function Dashboard() {
     return diffDays;
   }, [userStartDate]);
 
-  // Get today's data
-  const today = new Date().toISOString().split('T')[0];
-  const todayMeals = loggedMeals.filter(m => m.loggedAt?.startsWith(today));
-  const todayWorkouts = workouts.filter(w => w.loggedAt?.startsWith(today));
+  // Get today's data - memoize to prevent recalculation on every render
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayMeals = useMemo(
+    () => loggedMeals.filter(m => m.loggedAt?.startsWith(today)),
+    [loggedMeals, today]
+  );
+  const todayWorkouts = useMemo(
+    () => workouts.filter(w => w.loggedAt?.startsWith(today)),
+    [workouts, today]
+  );
 
-  // Calculate totals
-  const consumedCalories = todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0);
-  const burnedCalories = todayWorkouts.reduce((sum, w) => sum + (w.caloriesBurned || 0), 0);
+  // Calculate totals - memoized to prevent unnecessary recalculations
+  const consumedCalories = useMemo(
+    () => todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0),
+    [todayMeals]
+  );
+  const burnedCalories = useMemo(
+    () => todayWorkouts.reduce((sum, w) => sum + (w.caloriesBurned || 0), 0),
+    [todayWorkouts]
+  );
   const netCalories = consumedCalories - burnedCalories;
 
   const targets = currentMealPlan?.targets || {
@@ -80,28 +92,32 @@ export default function Dashboard() {
     fat: 65,
   };
 
-  const consumedMacros = todayMeals.reduce(
-    (acc, m) => ({
-      protein: acc.protein + (m.protein || 0),
-      carbs: acc.carbs + (m.carbs || 0),
-      fat: acc.fat + (m.fat || 0),
-    }),
-    { protein: 0, carbs: 0, fat: 0 }
+  const consumedMacros = useMemo(
+    () =>
+      todayMeals.reduce(
+        (acc, m) => ({
+          protein: acc.protein + (m.protein || 0),
+          carbs: acc.carbs + (m.carbs || 0),
+          fat: acc.fat + (m.fat || 0),
+        }),
+        { protein: 0, carbs: 0, fat: 0 }
+      ),
+    [todayMeals]
   );
 
   // Random quote
   const [quote] = useState(() => motivationalQuotes[Math.floor(Math.random() * motivationalQuotes.length)]);
 
-  const handleLogMeal = (meal: any) => {
+  const handleLogMeal = useCallback((meal: any) => {
     logMeal(meal);
     setShowLogMealModal(false);
     setSelectedMeal(null);
-  };
+  }, [logMeal]);
 
-  const handleLogWorkout = () => {
+  const handleLogWorkout = useCallback(() => {
     const workout = workoutTypes.find(w => w.name === workoutForm.type);
     if (!workout) return;
-    
+
     logWorkout({
       id: `workout_${Date.now()}`,
       name: workout.name,
@@ -111,11 +127,28 @@ export default function Dashboard() {
     });
     setShowLogWorkoutModal(false);
     setWorkoutForm({ type: '', duration: 30 });
-  };
+  }, [workoutForm.type, workoutForm.duration, logWorkout]);
 
-  const handleRegenerateMealPlan = () => {
+  const handleRegenerateMealPlan = useCallback(() => {
     navigate('/meal-plan-preview');
-  };
+  }, [navigate]);
+
+  const handleOpenLogMealModal = useCallback((meal: any) => {
+    setSelectedMeal(meal);
+    setShowLogMealModal(true);
+  }, []);
+
+  const handleCloseLogMealModal = useCallback(() => {
+    setShowLogMealModal(false);
+  }, []);
+
+  const handleOpenLogWorkoutModal = useCallback(() => {
+    setShowLogWorkoutModal(true);
+  }, []);
+
+  const handleCloseLogWorkoutModal = useCallback(() => {
+    setShowLogWorkoutModal(false);
+  }, []);
 
   if (!user) {
     return (
@@ -262,7 +295,7 @@ export default function Dashboard() {
               <span>No workouts logged yet</span>
             </div>
           )}
-          <button className="add-btn" onClick={() => setShowLogWorkoutModal(true)}>
+          <button className="add-btn" onClick={handleOpenLogWorkoutModal}>
             <Add />
             <span>Log Workout</span>
           </button>
@@ -305,10 +338,7 @@ export default function Dashboard() {
                   ) : (
                     <button
                       className="log-meal-btn"
-                      onClick={() => {
-                        setSelectedMeal(meal);
-                        setShowLogMealModal(true);
-                      }}
+                      onClick={() => handleOpenLogMealModal(meal)}
                     >
                       <Add />
                       <span>Log Meal</span>
@@ -362,7 +392,7 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setShowLogMealModal(false)}
+            onClick={handleCloseLogMealModal}
           >
             <motion.div
               className="modal glass-strong"
@@ -373,7 +403,7 @@ export default function Dashboard() {
             >
               <div className="modal-header">
                 <h3>Log Meal</h3>
-                <button className="close-btn" onClick={() => setShowLogMealModal(false)}>
+                <button className="close-btn" onClick={handleCloseLogMealModal}>
                   <Close />
                 </button>
               </div>
@@ -406,7 +436,7 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setShowLogWorkoutModal(false)}
+            onClick={handleCloseLogWorkoutModal}
           >
             <motion.div
               className="modal glass-strong"
@@ -417,7 +447,7 @@ export default function Dashboard() {
             >
               <div className="modal-header">
                 <h3>Log Workout</h3>
-                <button className="close-btn" onClick={() => setShowLogWorkoutModal(false)}>
+                <button className="close-btn" onClick={handleCloseLogWorkoutModal}>
                   <Close />
                 </button>
               </div>

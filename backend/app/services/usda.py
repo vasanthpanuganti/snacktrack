@@ -7,12 +7,14 @@ providing nutrition data for foods to support meal logging and tracking.
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+import time
 import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.redis import RedisClient, in_memory_limiter
+from app.core.cache import cached, TTL_1_HOUR, TTL_7_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -49,29 +51,57 @@ class FoodNutrition(BaseModel):
 
 class USDAFoodService:
     """Service for interacting with USDA FoodData Central API"""
-    
+
     def __init__(self):
         self.api_key = settings.USDA_API_KEY
         if not self.api_key:
             logger.warning("USDA API key not configured. Food nutrition lookup will not be available.")
-        
-        # Simple in-memory rate limiting (1000 requests per hour)
-        self._request_times: List[datetime] = []
-    
-    def _check_rate_limit(self):
-        """Check if we're within the rate limit (1000 requests/hour)"""
-        now = datetime.now()
-        # Remove requests older than 1 hour
-        self._request_times = [t for t in self._request_times if now - t < timedelta(hours=1)]
-        
-        if len(self._request_times) >= USDA_RATE_LIMIT_PER_HOUR:
+
+    async def _check_rate_limit(self) -> None:
+        """
+        Check if we're within the rate limit (1000 requests/hour) using Redis.
+        Falls back to in-memory rate limiting if Redis is unavailable.
+        """
+        now = int(time.time())
+        # Use hourly windows for USDA rate limit
+        window = now // 3600  # 1-hour buckets
+        key = f"usda:rl:{window}"
+
+        redis_client = await RedisClient.get_client()
+
+        if redis_client:
+            try:
+                # Atomic increment with Redis
+                current = await redis_client.incr(key)
+
+                # Set expiry on first request in window
+                if current == 1:
+                    await redis_client.expire(key, 3660)  # 61 minutes for safety
+
+                if current > USDA_RATE_LIMIT_PER_HOUR:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"USDA API rate limit exceeded. Limit: {USDA_RATE_LIMIT_PER_HOUR} requests/hour"
+                    )
+                return
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Redis error in USDA rate limiting: {e}")
+                # Fall through to in-memory fallback
+
+        # Fallback to in-memory rate limiting
+        is_allowed, current_count = in_memory_limiter.check_and_increment(
+            key,
+            USDA_RATE_LIMIT_PER_HOUR,
+            window_seconds=3600
+        )
+
+        if not is_allowed:
             raise HTTPException(
                 status_code=429,
                 detail=f"USDA API rate limit exceeded. Limit: {USDA_RATE_LIMIT_PER_HOUR} requests/hour"
             )
-        
-        # Record this request
-        self._request_times.append(now)
     
     def _get_params(self, additional_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Get base parameters including API key"""
@@ -93,9 +123,9 @@ class USDAFoodService:
                 status_code=503,
                 detail="USDA API key not configured"
             )
-        
+
         # Check rate limit
-        self._check_rate_limit()
+        await self._check_rate_limit()
         
         url = f"{USDA_BASE_URL}{endpoint}"
         request_params = self._get_params(params)
@@ -202,6 +232,7 @@ class USDAFoodService:
             description=food_item.get("additionalDescriptions") or food_item.get("description"),
         )
     
+    @cached(ttl=TTL_1_HOUR, prefix="usda:search")
     async def search_foods(
         self,
         query: str,
@@ -211,7 +242,7 @@ class USDAFoodService:
         brand_owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Search for foods using USDA API
+        Search for foods using USDA API (cached for 1 hour)
         
         Args:
             query: Search query (food name)
@@ -261,8 +292,9 @@ class USDAFoodService:
             logger.error(f"Error searching foods: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to search foods: {str(e)}")
     
+    @cached(ttl=TTL_7_DAYS, prefix="usda:food")
     async def get_food_by_id(self, fdc_id: int) -> FoodNutrition:
-        """Get detailed nutrition information for a food by FDC ID"""
+        """Get detailed nutrition information for a food by FDC ID (cached for 7 days)"""
         try:
             food_data = await self._make_request(f"/food/{fdc_id}")
             
