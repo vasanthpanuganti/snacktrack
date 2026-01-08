@@ -120,7 +120,7 @@ async def log_meal(meal: MealLogCreate, user_id: str = Query(default="demo-user"
     protein = meal.protein
     carbs = meal.carbs
     fat = meal.fat
-    
+
     # If USDA FDC ID is provided, fetch nutrition data automatically
     if meal.fdc_id and usda_service.api_key:
         try:
@@ -136,7 +136,7 @@ async def log_meal(meal: MealLogCreate, user_id: str = Query(default="demo-user"
         except Exception:
             # If USDA lookup fails, use provided values
             pass
-    
+
     entry = MealLogEntry(
         id=f"meal_{datetime.now().timestamp()}",
         name=meal.name,
@@ -149,6 +149,65 @@ async def log_meal(meal: MealLogCreate, user_id: str = Query(default="demo-user"
         recipe_id=meal.recipe_id
     )
     return entry
+
+
+@router.post("/log-batch", response_model=List[MealLogEntry], summary="Log multiple meals at once")
+async def log_meals_batch(meals: List[MealLogCreate], user_id: str = Query(default="demo-user")):
+    """
+    Log multiple meals at once. More efficient than logging individually.
+    Automatically fetches nutrition data from USDA API for meals with fdc_id.
+    """
+    # Collect all FDC IDs that need nutrition lookup
+    fdc_ids = [m.fdc_id for m in meals if m.fdc_id]
+    nutrition_map = {}
+
+    # Batch fetch nutrition data if needed
+    if fdc_ids and usda_service.api_key:
+        try:
+            # Use batch endpoint (max 20 at a time)
+            if len(fdc_ids) <= 20:
+                nutrition_data = await usda_service.get_foods_by_ids(fdc_ids)
+                nutrition_map = {food.fdc_id: food for food in nutrition_data}
+            else:
+                # Split into batches of 20
+                for i in range(0, len(fdc_ids), 20):
+                    batch = fdc_ids[i:i+20]
+                    nutrition_data = await usda_service.get_foods_by_ids(batch)
+                    nutrition_map.update({food.fdc_id: food for food in nutrition_data})
+        except Exception:
+            # If batch lookup fails, continue with provided values
+            pass
+
+    # Create meal log entries
+    entries = []
+    for meal in meals:
+        # Use USDA data if available
+        if meal.fdc_id and meal.fdc_id in nutrition_map:
+            food_nutrition = nutrition_map[meal.fdc_id]
+            calories = int(food_nutrition.calories) if food_nutrition.calories else meal.calories
+            protein = food_nutrition.protein if food_nutrition.protein else meal.protein
+            carbs = food_nutrition.carbs if food_nutrition.carbs else meal.carbs
+            fat = food_nutrition.fat if food_nutrition.fat else meal.fat
+        else:
+            calories = meal.calories
+            protein = meal.protein
+            carbs = meal.carbs
+            fat = meal.fat
+
+        entry = MealLogEntry(
+            id=f"meal_{datetime.now().timestamp()}_{len(entries)}",
+            name=meal.name,
+            calories=calories,
+            protein=protein,
+            carbs=carbs,
+            fat=fat,
+            meal_type=meal.meal_type,
+            time=datetime.now().strftime("%H:%M"),
+            recipe_id=meal.recipe_id
+        )
+        entries.append(entry)
+
+    return entries
 
 
 @router.put("/water/{date_str}", summary="Update water intake")

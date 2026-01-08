@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useDeferredValue } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -158,15 +158,33 @@ export default function Recipes() {
     );
   };
 
-  // Filter recipes
-  const filteredRecipes = allRecipes.filter((recipe) => {
-    const matchesSearch = recipe.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      recipe.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCuisine = selectedCuisine === 'All' || recipe.cuisine === selectedCuisine;
-    const matchesDiets = selectedDiets.length === 0 ||
-      selectedDiets.some((diet) => recipe.tags.includes(diet));
-    return matchesSearch && matchesCuisine && matchesDiets;
-  });
+  // Use deferred value for search to avoid filtering on every keystroke
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  // Memoize filtered recipes to prevent recalculation on every render
+  const filteredRecipes = useMemo(() => {
+    const searchLower = deferredSearchQuery.toLowerCase();
+
+    return allRecipes.filter((recipe) => {
+      // Early return for non-matching cuisine
+      if (selectedCuisine !== 'All' && recipe.cuisine !== selectedCuisine) {
+        return false;
+      }
+
+      // Early return for non-matching diets
+      if (selectedDiets.length > 0 && !selectedDiets.some((diet) => recipe.tags.includes(diet))) {
+        return false;
+      }
+
+      // Finally check search query if present
+      if (searchLower && !recipe.name.toLowerCase().includes(searchLower) &&
+          !recipe.description.toLowerCase().includes(searchLower)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [deferredSearchQuery, selectedCuisine, selectedDiets]);
 
   return (
     <motion.div
