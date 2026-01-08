@@ -295,49 +295,65 @@ async def list_recipes(
             )
             
             # Filter by meal_type and tags if provided (Spoonacular doesn't support these directly)
-            if meal_type:
-                results = [r for r in results if r.meal_type.lower() == meal_type.lower()]
-            
-            if tags:
-                tag_list = [t.strip().lower() for t in tags.split(",")]
-                results = [
-                    r for r in results
-                    if any(t in [tag.lower() for tag in r.tags] for t in tag_list)
-                ]
-            
+            # Optimized single-pass filter with pre-computed values
+            if meal_type or tags:
+                meal_type_lower = meal_type.lower() if meal_type else None
+                tag_set = set(t.strip().lower() for t in tags.split(",")) if tags else None
+
+                filtered_results = []
+                for r in results:
+                    # Early exit if meal_type doesn't match
+                    if meal_type_lower and r.meal_type.lower() != meal_type_lower:
+                        continue
+
+                    # Check tags if provided
+                    if tag_set:
+                        recipe_tags_lower = set(tag.lower() for tag in r.tags)
+                        if not tag_set.intersection(recipe_tags_lower):
+                            continue
+
+                    filtered_results.append(r)
+
+                return filtered_results
+
             return results
         except HTTPException:
             raise
         except Exception as e:
             logger.warning(f"Spoonacular API call failed, falling back to sample data: {e}")
     
-    # Fallback to sample data
-    results = SAMPLE_RECIPES.copy()
-    
-    if cuisine:
-        results = [r for r in results if r.cuisine.lower() == cuisine.lower()]
-    
-    if meal_type:
-        results = [r for r in results if r.meal_type.lower() == meal_type.lower()]
-    
-    if max_calories:
-        results = [r for r in results if r.nutrition.calories <= max_calories]
-    
-    if max_prep_time:
-        results = [r for r in results if r.prep_time <= max_prep_time]
-    
-    if tags:
-        tag_list = [t.strip() for t in tags.split(",")]
-        results = [r for r in results if any(t in r.tags for t in tag_list)]
-    
-    if search:
-        search_lower = search.lower()
-        results = [r for r in results if 
-            search_lower in r.title.lower() or 
-            search_lower in r.description.lower() or
-            search_lower in r.cuisine.lower()
-        ]
-    
+    # Fallback to sample data - optimized single-pass filter
+    # Pre-compute values outside loop
+    cuisine_lower = cuisine.lower() if cuisine else None
+    meal_type_lower = meal_type.lower() if meal_type else None
+    tag_set = set(t.strip() for t in tags.split(",")) if tags else None
+    search_lower = search.lower() if search else None
+
+    results = []
+    for recipe in SAMPLE_RECIPES:
+        # Early exit checks for better performance
+        if cuisine_lower and recipe.cuisine.lower() != cuisine_lower:
+            continue
+        if meal_type_lower and recipe.meal_type.lower() != meal_type_lower:
+            continue
+        if max_calories and recipe.nutrition.calories > max_calories:
+            continue
+        if max_prep_time and recipe.prep_time > max_prep_time:
+            continue
+
+        # Tag matching
+        if tag_set and not any(t in recipe.tags for t in tag_set):
+            continue
+
+        # Search matching
+        if search_lower:
+            if not (search_lower in recipe.title.lower() or
+                    search_lower in recipe.description.lower() or
+                    search_lower in recipe.cuisine.lower()):
+                continue
+
+        results.append(recipe)
+
     return results[offset:offset+limit]
 
 

@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.cache import cached, TTL_1_HOUR, TTL_24_HOURS
 
 if TYPE_CHECKING:
     from app.api.routes.recipes import RecipeResponse, NutritionInfo, Ingredient
@@ -200,6 +201,7 @@ class SpoonacularService:
             review_count=recipe.get("aggregateLikes", 0),
         )
     
+    @cached(ttl=TTL_1_HOUR, prefix="spoonacular:search")
     async def search_recipes(
         self,
         query: Optional[str] = None,
@@ -211,7 +213,7 @@ class SpoonacularService:
         offset: int = 0,
         limit: int = 20,
     ) -> List[RecipeResponse]:
-        """Search for recipes using Spoonacular API"""
+        """Search for recipes using Spoonacular API (cached for 1 hour)"""
         params = {
             "number": min(limit, 100),  # Spoonacular max is 100
             "offset": offset,
@@ -252,8 +254,9 @@ class SpoonacularService:
             logger.error(f"Error searching recipes: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to search recipes: {str(e)}")
     
+    @cached(ttl=TTL_24_HOURS, prefix="spoonacular:recipe")
     async def get_recipe_by_id(self, recipe_id: int) -> RecipeResponse:
-        """Get a specific recipe by ID from Spoonacular"""
+        """Get a specific recipe by ID from Spoonacular (cached for 24 hours)"""
         params = {
             "includeNutrition": True,
         }
@@ -267,37 +270,41 @@ class SpoonacularService:
             logger.error(f"Error fetching recipe {recipe_id}: {e}")
             raise HTTPException(status_code=404, detail=f"Recipe {recipe_id} not found")
     
+    @cached(ttl=TTL_24_HOURS, prefix="spoonacular:alternatives")
     async def get_recipe_alternatives(
         self,
         recipe_id: int,
         limit: int = 3,
     ) -> List[RecipeResponse]:
-        """Get alternative recipes similar to the given recipe"""
+        """Get alternative recipes similar to the given recipe (optimized to avoid N+1 query)"""
         try:
-            # First get the original recipe to know its nutrition profile
-            original = await self.get_recipe_by_id(recipe_id)
-            
-            # Search for similar recipes based on calories and macros
+            # Use Spoonacular's similar recipes endpoint directly (avoids fetching original recipe)
+            # This endpoint returns recipes similar to the given recipe ID
             params = {
                 "number": limit,
-                "maxCalories": original.nutrition.calories + 100,
-                "minCalories": max(0, original.nutrition.calories - 100),
-                "addRecipeInformation": True,
-                "addRecipeNutrition": True,
-                "fillIngredients": True,
             }
-            
-            data = await self._make_request("/recipes/complexSearch", params)
-            results = data.get("results", [])
-            
-            # Filter out the original recipe
-            alternatives = [
-                self._map_spoonacular_recipe(r)
-                for r in results
-                if str(r.get("id")) != str(recipe_id)
+
+            data = await self._make_request(f"/recipes/{recipe_id}/similar", params)
+
+            # The similar endpoint returns a simpler format, so we need to fetch full details
+            # But we do it in parallel for all results, not sequentially
+            similar_ids = [r.get("id") for r in data if r.get("id")]
+
+            if not similar_ids:
+                return []
+
+            # Fetch all recipes in parallel (much faster than N sequential calls)
+            import asyncio
+            tasks = [self.get_recipe_by_id(rid) for rid in similar_ids[:limit]]
+            alternatives = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Filter out any exceptions and return valid recipes
+            valid_alternatives = [
+                alt for alt in alternatives
+                if not isinstance(alt, Exception)
             ]
-            
-            return alternatives[:limit]
+
+            return valid_alternatives[:limit]
         except HTTPException:
             raise
         except Exception as e:

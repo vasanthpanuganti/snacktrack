@@ -296,10 +296,15 @@ export const useStore = create<AppState>()(
         isAuthenticated: state.isAuthenticated,
         userStartDate: state.userStartDate,
         currentMealPlan: state.currentMealPlan,
-        dailyLogs: state.dailyLogs,
-        loggedMeals: state.loggedMeals,
-        workouts: state.workouts,
-        achievements: state.achievements,
+        // Limit historical data to prevent localStorage quota issues
+        // Keep only last 30 days of logs (~30 entries max)
+        dailyLogs: state.dailyLogs.slice(-30),
+        // Keep only last 100 logged meals (~1-2 weeks of data)
+        loggedMeals: state.loggedMeals.slice(-100),
+        // Keep only last 100 workouts (~3-4 months of data)
+        workouts: state.workouts.slice(-100),
+        // Achievements can be refetched from API, so don't persist
+        // achievements: state.achievements,
       }),
     }
   )
